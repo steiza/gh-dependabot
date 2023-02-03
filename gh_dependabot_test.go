@@ -52,7 +52,6 @@ func mockGetContents(client api.RESTClient, repoOwner string, repoName string, m
 }
 
 func TestProcessFindings(t *testing.T) {
-
 	client, _ := gh.RESTClient(nil)
 
 	dependabotResponses := []DependabotResponse{}
@@ -99,7 +98,8 @@ func TestProcessFindings(t *testing.T) {
 		},
 	})
 
-	findings := processFindings(client, "octocat", "example-repo", dependabotResponses, mockGetContents)
+	findings := make(map[string]Finding)
+	processFindings(client, "octocat", "example-repo", dependabotResponses, mockGetContents, findings)
 
 	finding, ok := findings["testpkg (pip)"]
 

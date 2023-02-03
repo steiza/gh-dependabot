@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net/http"
 	"net/url"
 	"regexp"
 	"sort"
@@ -156,9 +157,7 @@ func getContents(client api.RESTClient, repoOwner string, repoName string, manif
 	return string(content)
 }
 
-func processFindings(client api.RESTClient, owner string, name string, dependabotResponses []DependabotResponse, getContents func(api.RESTClient, string, string, string) string) map[string]Finding {
-	findings := make(map[string]Finding)
-
+func processFindings(client api.RESTClient, owner string, name string, dependabotResponses []DependabotResponse, getContents func(api.RESTClient, string, string, string) string, findings map[string]Finding) {
 	for _, value := range dependabotResponses {
 		pkg := value.SecurityVulnerability.Package
 		pkgString := fmt.Sprintf("%s (%s)", strings.ToLower(pkg.Name), pkg.Ecosystem)
@@ -192,8 +191,18 @@ func processFindings(client api.RESTClient, owner string, name string, dependabo
 			}
 		}
 	}
+}
 
-	return findings
+var linkRE = regexp.MustCompile(`<([^>]+)>;\s*rel="([^"]+)"`)
+var urlPath *string
+
+func findNextPage(resp *http.Response) (string, bool) {
+	for _, m := range linkRE.FindAllStringSubmatch(resp.Header.Get("Link"), -1) {
+		if len(m) > 2 && m[2] == "next" {
+			return m[1], true
+		}
+	}
+	return "", false
 }
 
 func main() {
@@ -223,26 +232,35 @@ func main() {
 	params.Add("state", "open")
 	params.Add("per_page", "100")
 
-	resp, err := client.Request("GET", "repos/"+repo.Owner()+"/"+repo.Name()+"/dependabot/alerts?"+params.Encode(), nil)
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer resp.Body.Close()
+	urlPathStr := "repos/" + repo.Owner() + "/" + repo.Name() + "/dependabot/alerts?" + params.Encode()
+	urlPath = &urlPathStr
 
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		log.Fatal(err)
-	}
+	findings := make(map[string]Finding)
 
-	err = json.Unmarshal(body, &dependabotResponse)
-	if err != nil {
-		log.Fatal(err)
-	}
+	for {
+		resp, err := client.Request("GET", *urlPath, nil)
+		if err != nil {
+			log.Fatal(err)
+		}
+		defer resp.Body.Close()
 
-	findings := processFindings(client, repo.Owner(), repo.Name(), dependabotResponse, getContents)
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			log.Fatal(err)
+		}
 
-	if len(resp.Header["Link"]) > 0 {
-		fmt.Println("Results truncated to first 100")
+		err = json.Unmarshal(body, &dependabotResponse)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		processFindings(client, repo.Owner(), repo.Name(), dependabotResponse, getContents, findings)
+		urlPathStr, next := findNextPage(resp)
+		urlPath = &urlPathStr
+
+		if !next {
+			break
+		}
 	}
 
 	findingList := Findings{}
