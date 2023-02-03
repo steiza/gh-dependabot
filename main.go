@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/cli/go-gh"
+	"github.com/cli/go-gh/pkg/api"
 	"github.com/cli/go-gh/pkg/repository"
 	"github.com/cli/go-gh/pkg/tableprinter"
 	"github.com/cli/go-gh/pkg/term"
@@ -42,6 +43,15 @@ func semverLess(i, j string) bool {
 	}
 
 	return false
+}
+
+func contentToVersion(content string, packageName string) string {
+	r, _ := regexp.Compile("(?i).*" + packageName + ".*")
+	lineMatch := r.FindString(content)
+	lineMatch = strings.Trim(lineMatch, "\n")
+
+	r, _ = regexp.Compile("[0-9]+(\\.[0-9a-zA-Z]+)+")
+	return r.FindString(lineMatch)
 }
 
 func sevStrToInt(sev string) int {
@@ -96,6 +106,96 @@ func (f Findings) Less(i, j int) bool {
 	return f[i].TopSummarySeverity < f[j].TopSummarySeverity
 }
 
+type Dependency struct {
+	ManifestPath string `json:"manifest_path"`
+}
+
+type SecurityAdvisory struct {
+	Summary string
+}
+
+type Package struct {
+	Ecosystem string
+	Name      string
+}
+
+type FirstPatchedVersion struct {
+	Identifier string
+}
+
+type SecurityVulnerability struct {
+	Package             Package
+	Severity            string
+	FirstPatchedVersion FirstPatchedVersion `json:"first_patched_version"`
+}
+
+type DependabotResponse struct {
+	Number                int
+	State                 string
+	Dependency            Dependency
+	SecurityAdvisory      SecurityAdvisory      `json:"security_advisory"`
+	SecurityVulnerability SecurityVulnerability `json:"security_vulnerability"`
+}
+
+func getContents(client api.RESTClient, repoOwner string, repoName string, manifestPath string) string {
+	contentResponse := struct {
+		Encoding string
+		Content  string
+	}{}
+
+	err := client.Get("repos/"+repoOwner+"/"+repoName+"/contents/"+manifestPath, &contentResponse)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	content, err := base64.StdEncoding.DecodeString(contentResponse.Content)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	return string(content)
+}
+
+func processFindings(client api.RESTClient, owner string, name string, dependabotResponses []DependabotResponse, getContents func(api.RESTClient, string, string, string) string) map[string]Finding {
+	findings := make(map[string]Finding)
+
+	for _, value := range dependabotResponses {
+		pkg := value.SecurityVulnerability.Package
+		pkgString := fmt.Sprintf("%s (%s)", strings.ToLower(pkg.Name), pkg.Ecosystem)
+
+		valueSev := sevStrToInt(value.SecurityVulnerability.Severity)
+
+		if finding, ok := findings[pkgString]; ok {
+			if valueSev > finding.TopSummarySeverity {
+				finding.TopSummary = value.SecurityAdvisory.Summary
+				finding.TopSummarySeverity = valueSev
+			}
+			if semverLess(finding.TopPatchedVersion, value.SecurityVulnerability.FirstPatchedVersion.Identifier) {
+				finding.TopPatchedVersion = value.SecurityVulnerability.FirstPatchedVersion.Identifier
+			}
+			finding.Count += 1
+			findings[pkgString] = finding
+		} else {
+			// Find out what version we're using by querying content API
+			content := getContents(client, owner, name, value.Dependency.ManifestPath)
+			version := contentToVersion(content, pkg.Name)
+
+			findings[pkgString] = Finding{
+				Name:               strings.ToLower(pkg.Name),
+				Ecosystem:          pkg.Ecosystem,
+				ManifestPath:       value.Dependency.ManifestPath,
+				ManifestVersion:    version,
+				TopSummary:         value.SecurityAdvisory.Summary,
+				TopSummarySeverity: valueSev,
+				TopPatchedVersion:  value.SecurityVulnerability.FirstPatchedVersion.Identifier,
+				Count:              1,
+			}
+		}
+	}
+
+	return findings
+}
+
 func main() {
 	client, err := gh.RESTClient(nil)
 	if err != nil {
@@ -117,41 +217,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	type Dependency struct {
-		ManifestPath string `json:"manifest_path"`
-	}
-
-	type SecurityAdvisory struct {
-		Summary string
-	}
-
-	type Package struct {
-		Ecosystem string
-		Name      string
-	}
-
-	type FirstPatchedVersion struct {
-		Identifier string
-	}
-
-	type SecurityVulnerability struct {
-		Package             Package
-		Severity            string
-		FirstPatchedVersion FirstPatchedVersion `json:"first_patched_version"`
-	}
-
-	dependabotResponse := []struct {
-		Number                int
-		State                 string
-		Dependency            Dependency
-		SecurityAdvisory      SecurityAdvisory      `json:"security_advisory"`
-		SecurityVulnerability SecurityVulnerability `json:"security_vulnerability"`
-	}{}
-
-	contentResponse := struct {
-		Encoding string
-		Content  string
-	}{}
+	dependabotResponse := []DependabotResponse{}
 
 	params := url.Values{}
 	params.Add("state", "open")
@@ -173,55 +239,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	// Aggregate findings
-	findings := make(map[string]Finding)
-	for _, value := range dependabotResponse {
-		pkg := value.SecurityVulnerability.Package
-		pkgString := fmt.Sprintf("%s (%s)", strings.ToLower(pkg.Name), pkg.Ecosystem)
-
-		valueSev := sevStrToInt(value.SecurityVulnerability.Severity)
-
-		if finding, ok := findings[pkgString]; ok {
-			if valueSev > finding.TopSummarySeverity {
-				finding.TopSummary = value.SecurityAdvisory.Summary
-				finding.TopSummarySeverity = valueSev
-			}
-			if semverLess(finding.TopPatchedVersion, value.SecurityVulnerability.FirstPatchedVersion.Identifier) {
-				finding.TopPatchedVersion = value.SecurityVulnerability.FirstPatchedVersion.Identifier
-			}
-			finding.Count += 1
-			findings[pkgString] = finding
-		} else {
-			// Find out what version we're using by querying content API
-			err = client.Get("repos/"+repo.Owner()+"/"+repo.Name()+"/contents/"+value.Dependency.ManifestPath, &contentResponse)
-			if err != nil {
-				log.Fatal(err)
-			}
-
-			content, err := base64.StdEncoding.DecodeString(contentResponse.Content)
-			if err != nil {
-				log.Fatal(err)
-			}
-
-			r, _ := regexp.Compile("(?i)\n.*" + pkg.Name + ".*\n")
-			lineMatch := r.FindString(string(content))
-			lineMatch = strings.Trim(lineMatch, "\n")
-
-			r, _ = regexp.Compile("[0-9]+(\\.[0-9a-zA-Z]+)+")
-			versionMatch := r.FindString(lineMatch)
-
-			findings[pkgString] = Finding{
-				Name:               strings.ToLower(pkg.Name),
-				Ecosystem:          pkg.Ecosystem,
-				ManifestPath:       value.Dependency.ManifestPath,
-				ManifestVersion:    versionMatch,
-				TopSummary:         value.SecurityAdvisory.Summary,
-				TopSummarySeverity: valueSev,
-				TopPatchedVersion:  value.SecurityVulnerability.FirstPatchedVersion.Identifier,
-				Count:              1,
-			}
-		}
-	}
+	findings := processFindings(client, repo.Owner(), repo.Name(), dependabotResponse, getContents)
 
 	if len(resp.Header["Link"]) > 0 {
 		fmt.Println("Results truncated to first 100")
