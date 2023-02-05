@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"os"
 	"regexp"
 	"sort"
 	"strconv"
@@ -16,9 +17,12 @@ import (
 
 	"github.com/cli/go-gh"
 	"github.com/cli/go-gh/pkg/api"
+	"github.com/cli/go-gh/pkg/browser"
 	"github.com/cli/go-gh/pkg/repository"
 	"github.com/cli/go-gh/pkg/tableprinter"
 	"github.com/cli/go-gh/pkg/term"
+	"github.com/gdamore/tcell/v2"
+	"github.com/rivo/tview"
 )
 
 func semverLess(i, j string) bool {
@@ -87,6 +91,22 @@ type Finding struct {
 	TopSummarySeverity int
 	TopPatchedVersion  string
 	Count              int
+}
+
+func (f Finding) PackageString() string {
+	return f.Name + " (" + f.Ecosystem + ")"
+}
+
+func (f Finding) UsageString() string {
+	return f.ManifestVersion + " (" + f.ManifestPath + ")"
+}
+
+func (f Finding) SummaryString() string {
+	if f.Count == 1 {
+		return f.TopSummary
+	} else {
+		return fmt.Sprintf("(+ %d) %s", f.Count, f.TopSummary)
+	}
 }
 
 type Findings []Finding
@@ -212,6 +232,7 @@ func main() {
 	}
 
 	repoOverride := flag.String("repo", "r", "Repository to query. Current directory used by default.")
+	interactive := flag.Bool("interactive", false, "Interact with results in the terminal.")
 	flag.Parse()
 
 	var repo repository.Repository
@@ -269,38 +290,92 @@ func main() {
 	}
 	sort.Reverse(findingList)
 
-	// Print out findings
-	terminal := term.FromEnv()
-	termWidth, _, _ := terminal.Size()
-	t := tableprinter.New(terminal.Out(), terminal.IsTerminalOutput(), termWidth)
+	if *interactive {
+		app := tview.NewApplication()
 
-	t.AddField("Dependency")
-	t.AddField("Summary")
-	t.AddField("Sev")
-	t.AddField("Usage")
-	t.AddField("Upgrade")
-	t.EndRow()
-	t.AddField("----")
-	t.AddField("----")
-	t.AddField("----")
-	t.AddField("----")
-	t.AddField("----")
-	t.EndRow()
+		details := tview.NewTextView().SetDynamicColors(true).SetWordWrap(true)
+		details.SetBorder(true).SetBorderColor(tcell.ColorGreen)
 
-	for _, value := range findingList {
-		t.AddField(value.Name + " (" + value.Ecosystem + ")")
-		if value.Count > 1 {
-			t.AddField(fmt.Sprintf("(+ %d) %s", value.Count, value.TopSummary))
-		} else {
-			t.AddField(value.TopSummary)
+		depList := tview.NewList()
+		for _, value := range findingList {
+			depList.AddItem(value.PackageString(), "  "+value.UsageString()+" -> "+value.TopPatchedVersion, rune(0), nil)
 		}
-		t.AddField(sevIntToStr(value.TopSummarySeverity))
-		t.AddField(value.ManifestVersion + " (" + value.ManifestPath + ")")
-		t.AddField(value.TopPatchedVersion)
-		t.EndRow()
-	}
 
-	if err = t.Render(); err != nil {
-		log.Fatal(err)
+		depListChangedFunc := func(index int, mainText, secondaryText string, shortcut rune) {
+			if index > len(findingList) {
+				details.SetText("")
+			} else {
+				item := findingList[index]
+				details.SetText("\n  [green]Package:[white]  " + item.PackageString() + "\n\n  [green]Severity:[white] " + sevIntToStr(item.TopSummarySeverity) + "\n\n  [green]Summary:[white]\n\n  " + item.SummaryString() + "\n\n  [green]Usage:[white]    " + item.UsageString() + "\n\n  [green]Upgrade:[white]  " + item.TopPatchedVersion)
+			}
+		}
+
+		depListChangedFunc(0, "", "", rune(0))
+		depList.SetChangedFunc(depListChangedFunc)
+
+		flex := tview.NewFlex().AddItem(depList, 0, 1, true).AddItem(details, 0, 1, false)
+
+		frame := tview.NewFrame(flex).SetBorders(1, 1, 1, 1, 0, 0)
+		frame.AddText("Dependabot Alerts for "+repo.Owner()+"/"+repo.Name(), true, tview.AlignCenter, tcell.ColorWhite)
+		frame.AddText("q: quit   a: open alerts in browser", false, tview.AlignCenter, tcell.ColorWhite)
+
+		app.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+			switch event.Rune() {
+			case 'q':
+				app.Stop()
+
+			case 'a':
+				index := depList.GetCurrentItem()
+				item := findingList[index]
+
+				params := url.Values{}
+				params.Add("q", fmt.Sprintf("is:open package:%s ecosystem:%s", item.Name, item.Ecosystem))
+				url := "https://" + repo.Host() + "/" + repo.Owner() + "/" + repo.Name() + "/security/dependabot?" + params.Encode()
+				b := browser.New("", os.Stdout, os.Stderr)
+				err = b.Browse(url)
+				if err != nil {
+					log.Println(err)
+				}
+			}
+
+			return event
+		})
+
+		err := app.SetRoot(frame, true).Run()
+		if err != nil {
+			log.Fatal(err)
+		}
+
+	} else {
+		// Print out findings
+		terminal := term.FromEnv()
+		termWidth, _, _ := terminal.Size()
+		t := tableprinter.New(terminal.Out(), terminal.IsTerminalOutput(), termWidth)
+
+		t.AddField("Dependency")
+		t.AddField("Summary")
+		t.AddField("Sev")
+		t.AddField("Usage")
+		t.AddField("Upgrade")
+		t.EndRow()
+		t.AddField("----")
+		t.AddField("----")
+		t.AddField("----")
+		t.AddField("----")
+		t.AddField("----")
+		t.EndRow()
+
+		for _, value := range findingList {
+			t.AddField(value.PackageString())
+			t.AddField(value.SummaryString())
+			t.AddField(sevIntToStr(value.TopSummarySeverity))
+			t.AddField(value.UsageString())
+			t.AddField(value.TopPatchedVersion)
+			t.EndRow()
+		}
+
+		if err = t.Render(); err != nil {
+			log.Fatal(err)
+		}
 	}
 }
