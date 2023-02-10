@@ -4,6 +4,7 @@ go 1.18
 
 require (
 	github.com/cli/go-gh v1.0.0
+	github.com/cli/shurcooL-graphql v0.0.2
 	github.com/gdamore/tcell/v2 v2.5.4
 	github.com/rivo/tview v0.0.0-20230203122838-f0550c7918da
 )
@@ -11,7 +12,6 @@ require (
 require (
 	github.com/cli/browser v1.1.0 // indirect
 	github.com/cli/safeexec v1.0.0 // indirect
-	github.com/cli/shurcooL-graphql v0.0.2 // indirect
 	github.com/gdamore/encoding v1.0.0 // indirect
 	github.com/google/shlex v0.0.0-20191202100458-e7afc7fbc510 // indirect
 	github.com/henvic/httpretty v0.0.6 // indirect

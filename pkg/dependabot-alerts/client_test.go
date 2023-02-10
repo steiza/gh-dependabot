@@ -1,10 +1,9 @@
-package main
+package da
 
 import (
 	"testing"
 
-	"github.com/cli/go-gh"
-	"github.com/cli/go-gh/pkg/api"
+	dg "github.com/steiza/gh-dependabot/pkg/dependency-graph"
 )
 
 func TestSemverLess(t *testing.T) {
@@ -23,40 +22,16 @@ func TestSemverLess(t *testing.T) {
 	if semverLess("12.13.15", "12.13.14") {
 		t.Error("12.13.15 should not be less than 12.13.14")
 	}
-}
 
-func TestContentToVersion(t *testing.T) {
-	if contentToVersion("", "testpkg") != "" {
-		t.Error("`testpkg` is not in empty string")
+	if !semverLess("= 1.2.3", "> 4.5.6") {
+		t.Error("1.2.3 should be less than 4.5.6")
 	}
-
-	if contentToVersion("apkg@1.2.3\ntestpkg@4.5.6\nsomepkg@7.8.9", "testpkg") != "4.5.6" {
-		t.Error("Unable to find `testpkg`")
-	}
-
-	if contentToVersion("TestPkg@1.2.3", "testpkg") != "1.2.3" {
-		t.Error("Case insensitive search failed for `testpkg`")
-	}
-
-	if contentToVersion("testpkg@1.2alpha", "testpkg") != "1.2alpha" {
-		t.Error("Version string should be `1.2alpha`")
-	}
-
-	if contentToVersion("testpkg@1.2.3:deadbeef", "testpkg") != "1.2.3" {
-		t.Error("Version string should be `1.2.3`")
-	}
-}
-
-func mockGetContents(client api.RESTClient, repoOwner string, repoName string, manifestPath string) string {
-	return "apkg@1.2.3\ntestpkg@4.5.6\nsomepkg@7.8.9"
 }
 
 func TestProcessFindings(t *testing.T) {
-	client, _ := gh.RESTClient(nil)
+	alertResponses := []AlertResponse{}
 
-	dependabotResponses := []DependabotResponse{}
-
-	dependabotResponses = append(dependabotResponses, DependabotResponse{
+	alertResponses = append(alertResponses, AlertResponse{
 		Number: 1,
 		State:  "open",
 		Dependency: Dependency{
@@ -77,7 +52,7 @@ func TestProcessFindings(t *testing.T) {
 		},
 	})
 
-	dependabotResponses = append(dependabotResponses, DependabotResponse{
+	alertResponses = append(alertResponses, AlertResponse{
 		Number: 2,
 		State:  "open",
 		Dependency: Dependency{
@@ -98,8 +73,17 @@ func TestProcessFindings(t *testing.T) {
 		},
 	})
 
+	dependencyMap := dg.DependencyMap{
+		"a/s/d/f": {
+			"pip": {
+				"testpkg": "> 1.2.3",
+			},
+		},
+	}
+
 	findings := make(map[string]Finding)
-	processFindings(client, "octocat", "example-repo", dependabotResponses, mockGetContents, findings)
+
+	processFindings(alertResponses, dependencyMap, findings)
 
 	finding, ok := findings["testpkg (pip)"]
 
@@ -118,4 +102,5 @@ func TestProcessFindings(t *testing.T) {
 	if finding.TopPatchedVersion != "5.0.1" {
 		t.Error("`processFindings` should have `TopPatchedVersion` of `5.0.1`")
 	}
+
 }
