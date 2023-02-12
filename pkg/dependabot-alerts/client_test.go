@@ -2,8 +2,6 @@ package da
 
 import (
 	"testing"
-
-	dg "github.com/steiza/gh-dependabot/pkg/dependency-graph"
 )
 
 func TestSemverLess(t *testing.T) {
@@ -29,14 +27,10 @@ func TestSemverLess(t *testing.T) {
 }
 
 func TestProcessFindings(t *testing.T) {
-	alertResponses := []AlertResponse{}
+	var nodes []Node
 
-	alertResponses = append(alertResponses, AlertResponse{
+	nodes = append(nodes, Node{
 		Number: 1,
-		State:  "open",
-		Dependency: Dependency{
-			ManifestPath: "a/s/d/f",
-		},
 		SecurityAdvisory: SecurityAdvisory{
 			Summary: "Something happened",
 		},
@@ -45,19 +39,18 @@ func TestProcessFindings(t *testing.T) {
 				Ecosystem: "pip",
 				Name:      "TestPkg",
 			},
-			Severity: "critical",
+			Severity: "CRITICAL",
 			FirstPatchedVersion: FirstPatchedVersion{
 				Identifier: "5.0.0",
 			},
 		},
+		State:                  "open",
+		VulnerableManifestPath: "a/s/d/f",
+		VulnerableRequirements: "1.2.3",
 	})
 
-	alertResponses = append(alertResponses, AlertResponse{
+	nodes = append(nodes, Node{
 		Number: 2,
-		State:  "open",
-		Dependency: Dependency{
-			ManifestPath: "a/s/d/f",
-		},
 		SecurityAdvisory: SecurityAdvisory{
 			Summary: "Something else happened",
 		},
@@ -66,24 +59,26 @@ func TestProcessFindings(t *testing.T) {
 				Ecosystem: "pip",
 				Name:      "TestPkg",
 			},
-			Severity: "high",
+			Severity: "HIGH",
 			FirstPatchedVersion: FirstPatchedVersion{
 				Identifier: "5.0.1",
 			},
 		},
+		State:                  "open",
+		VulnerableManifestPath: "a/s/d/f",
 	})
 
-	dependencyMap := dg.DependencyMap{
-		"a/s/d/f": {
-			"pip": {
-				"testpkg": "> 1.2.3",
+	query := Query{
+		Repository{
+			VulnerabilityAlerts{
+				Nodes: nodes,
 			},
 		},
 	}
 
 	findings := make(map[string]Finding)
 
-	processFindings(alertResponses, dependencyMap, findings)
+	processFindings(&query, findings)
 
 	finding, ok := findings["testpkg (pip)"]
 
@@ -102,5 +97,4 @@ func TestProcessFindings(t *testing.T) {
 	if finding.TopPatchedVersion != "5.0.1" {
 		t.Error("`processFindings` should have `TopPatchedVersion` of `5.0.1`")
 	}
-
 }

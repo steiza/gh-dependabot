@@ -1,28 +1,16 @@
 package da
 
 import (
-	"encoding/json"
 	"fmt"
-	"io"
 	"log"
-	"net/http"
-	"net/url"
 	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 
 	gh "github.com/cli/go-gh"
-	dg "github.com/steiza/gh-dependabot/pkg/dependency-graph"
+	graphql "github.com/cli/shurcooL-graphql"
 )
-
-type Dependency struct {
-	ManifestPath string `json:"manifest_path"`
-}
-
-type SecurityAdvisory struct {
-	Summary string
-}
 
 type Package struct {
 	Ecosystem string
@@ -34,17 +22,47 @@ type FirstPatchedVersion struct {
 }
 
 type SecurityVulnerability struct {
-	Severity            string
+	FirstPatchedVersion FirstPatchedVersion
 	Package             Package
-	FirstPatchedVersion FirstPatchedVersion `json:"first_patched_version"`
+	Severity            string
 }
 
-type AlertResponse struct {
-	Number                int
-	State                 string
-	Dependency            Dependency
-	SecurityAdvisory      SecurityAdvisory      `json:"security_advisory"`
-	SecurityVulnerability SecurityVulnerability `json:"security_vulnerability"`
+type SecurityAdvisory struct {
+	Summary string
+}
+
+type Node struct {
+	DependabotUpdate struct {
+		PullRequest struct {
+			ResourcePath string
+			State        string
+		}
+	}
+	DependencyScope  string
+	Number           int
+	SecurityAdvisory struct {
+		Summary string
+	}
+	SecurityVulnerability  SecurityVulnerability
+	State                  string
+	VulnerableManifestPath string
+	VulnerableRequirements string
+}
+
+type VulnerabilityAlerts struct {
+	Nodes    []Node
+	PageInfo struct {
+		HasNextPage bool
+		EndCursor   string
+	}
+}
+
+type Repository struct {
+	VulnerabilityAlerts VulnerabilityAlerts `graphql:"vulnerabilityAlerts(first: $first, after: $cursor, states:OPEN)"`
+}
+
+type Query struct {
+	Repository Repository `graphql:"repository(name: $name, owner: $owner)"`
 }
 
 type Finding struct {
@@ -56,6 +74,8 @@ type Finding struct {
 	TopSummarySeverity int
 	TopPatchedVersion  string
 	Count              int
+	DependencyScope    string
+	PullRequestURL     string
 }
 
 type Findings []Finding
@@ -92,6 +112,18 @@ func (f Finding) SummaryString() string {
 	}
 }
 
+func (f Finding) VersionString() string {
+	return fmt.Sprintf("%s -> %s", strings.SplitAfter(f.ManifestVersion, " ")[1], f.TopPatchedVersion)
+}
+
+func (f Finding) HasPR() string {
+	if f.PullRequestURL != "" {
+		return "Y"
+	} else {
+		return "N"
+	}
+}
+
 func semverLess(i, j string) bool {
 	r, _ := regexp.Compile("[0-9]+(\\.[0-9a-zA-Z]+)+")
 
@@ -120,11 +152,11 @@ func semverLess(i, j string) bool {
 }
 
 func sevStrToInt(sev string) int {
-	if sev == "critical" {
+	if sev == "CRITICAL" {
 		return 4
-	} else if sev == "high" {
+	} else if sev == "HIGH" {
 		return 3
-	} else if sev == "medium" {
+	} else if sev == "MEDIUM" {
 		return 2
 	}
 	return 1
@@ -142,57 +174,36 @@ func SevIntToStr(sev int) string {
 	return "low"
 }
 
-var linkRE = regexp.MustCompile(`<([^>]+)>;\s*rel="([^"]+)"`)
 var urlPath *string
 
-func findNextPage(resp *http.Response) (string, bool) {
-	for _, m := range linkRE.FindAllStringSubmatch(resp.Header.Get("Link"), -1) {
-		if len(m) > 2 && m[2] == "next" {
-			return m[1], true
-		}
-	}
-	return "", false
-}
-
-func GetFindings(repoOwner, repoName string, dependencyMap dg.DependencyMap) Findings {
+func GetFindings(repoOwner, repoName string) Findings {
 	findings := make(map[string]Finding)
 
-	client, err := gh.RESTClient(nil)
+	client, err := gh.GQLClient(nil)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	alertResponses := []AlertResponse{}
-
-	params := url.Values{}
-	params.Add("state", "open")
-	params.Add("per_page", "100")
-
-	urlPathStr := "repos/" + repoOwner + "/" + repoName + "/dependabot/alerts?" + params.Encode()
-	urlPath = &urlPathStr
+	var cursor *graphql.String
 
 	for {
-		resp, err := client.Request("GET", *urlPath, nil)
+		var query Query
+
+		variables := map[string]interface{}{
+			"name":   graphql.String(repoName),
+			"owner":  graphql.String(repoOwner),
+			"first":  graphql.Int(100),
+			"cursor": cursor,
+		}
+
+		err := client.Query("DependabotAlerts", &query, variables)
 		if err != nil {
 			log.Fatal(err)
 		}
-		defer resp.Body.Close()
 
-		body, err := io.ReadAll(resp.Body)
-		if err != nil {
-			log.Fatal(err)
-		}
-
-		err = json.Unmarshal(body, &alertResponses)
-		if err != nil {
-			log.Fatal(err)
-		}
-
-		processFindings(alertResponses, dependencyMap, findings)
-		urlPathStr, next := findNextPage(resp)
-		urlPath = &urlPathStr
-
-		if !next {
+		processFindings(&query, findings)
+		cursor = (*graphql.String)(&query.Repository.VulnerabilityAlerts.PageInfo.EndCursor)
+		if !query.Repository.VulnerabilityAlerts.PageInfo.HasNextPage {
 			break
 		}
 	}
@@ -206,38 +217,46 @@ func GetFindings(repoOwner, repoName string, dependencyMap dg.DependencyMap) Fin
 	return findingList
 }
 
-func processFindings(alertResponses []AlertResponse, dependencyMap dg.DependencyMap, findings map[string]Finding) {
-	for _, value := range alertResponses {
-		pkg := value.SecurityVulnerability.Package
+func processFindings(query *Query, findings map[string]Finding) {
+	for _, node := range query.Repository.VulnerabilityAlerts.Nodes {
+		pkg := node.SecurityVulnerability.Package
 		pkgName := strings.ToLower(pkg.Name)
 		pkgEcosystem := strings.ToLower(pkg.Ecosystem)
 		pkgKey := fmt.Sprintf("%s (%s)", pkgName, pkgEcosystem)
 
-		sevInt := sevStrToInt(value.SecurityVulnerability.Severity)
+		sevInt := sevStrToInt(node.SecurityVulnerability.Severity)
 
 		if finding, ok := findings[pkgKey]; ok {
 			if sevInt > finding.TopSummarySeverity {
-				finding.TopSummary = value.SecurityAdvisory.Summary
+				finding.TopSummary = node.SecurityAdvisory.Summary
 				finding.TopSummarySeverity = sevInt
 			}
-			if semverLess(finding.TopPatchedVersion, value.SecurityVulnerability.FirstPatchedVersion.Identifier) {
-				finding.TopPatchedVersion = value.SecurityVulnerability.FirstPatchedVersion.Identifier
+			if semverLess(finding.TopPatchedVersion, node.SecurityVulnerability.FirstPatchedVersion.Identifier) {
+				finding.TopPatchedVersion = node.SecurityVulnerability.FirstPatchedVersion.Identifier
+			}
+			if node.DependabotUpdate.PullRequest.State == "OPEN" {
+				finding.PullRequestURL = node.DependabotUpdate.PullRequest.ResourcePath
 			}
 			finding.Count += 1
 			findings[pkgKey] = finding
 		} else {
-			version := dependencyMap[value.Dependency.ManifestPath][pkgEcosystem][pkgName]
-
-			findings[pkgKey] = Finding{
+			finding = Finding{
 				Name:               pkgName,
 				Ecosystem:          pkgEcosystem,
-				ManifestPath:       value.Dependency.ManifestPath,
-				ManifestVersion:    version,
-				TopSummary:         value.SecurityAdvisory.Summary,
+				ManifestPath:       node.VulnerableManifestPath,
+				ManifestVersion:    node.VulnerableRequirements,
+				TopSummary:         node.SecurityAdvisory.Summary,
 				TopSummarySeverity: sevInt,
-				TopPatchedVersion:  value.SecurityVulnerability.FirstPatchedVersion.Identifier,
+				TopPatchedVersion:  node.SecurityVulnerability.FirstPatchedVersion.Identifier,
 				Count:              1,
+				DependencyScope:    node.DependencyScope,
 			}
+
+			if node.DependabotUpdate.PullRequest.State == "OPEN" {
+				finding.PullRequestURL = node.DependabotUpdate.PullRequest.ResourcePath
+			}
+
+			findings[pkgKey] = finding
 		}
 	}
 }
