@@ -176,8 +176,8 @@ func SevIntToStr(sev int) string {
 
 var urlPath *string
 
-func GetFindings(repoOwner, repoName string) Findings {
-	findings := make(map[string]Finding)
+func GetNodes(repoOwner, repoName string) []Node {
+	var nodes []Node
 
 	client, err := gh.GQLClient(nil)
 	if err != nil {
@@ -185,7 +185,6 @@ func GetFindings(repoOwner, repoName string) Findings {
 	}
 
 	var cursor *graphql.String
-
 	for {
 		var query Query
 
@@ -201,12 +200,22 @@ func GetFindings(repoOwner, repoName string) Findings {
 			log.Fatal(err)
 		}
 
-		processFindings(&query, findings)
+		nodes = append(nodes, query.Repository.VulnerabilityAlerts.Nodes...)
+
 		cursor = (*graphql.String)(&query.Repository.VulnerabilityAlerts.PageInfo.EndCursor)
 		if !query.Repository.VulnerabilityAlerts.PageInfo.HasNextPage {
 			break
 		}
 	}
+
+	return nodes
+}
+
+func GetFindings(repoOwner, repoName string) Findings {
+	nodes := GetNodes(repoOwner, repoName)
+	findings := make(map[string]Finding)
+
+	processFindings(nodes, findings)
 
 	findingList := Findings{}
 	for _, value := range findings {
@@ -217,8 +226,8 @@ func GetFindings(repoOwner, repoName string) Findings {
 	return findingList
 }
 
-func processFindings(query *Query, findings map[string]Finding) {
-	for _, node := range query.Repository.VulnerabilityAlerts.Nodes {
+func processFindings(nodes []Node, findings map[string]Finding) {
+	for _, node := range nodes {
 		pkg := node.SecurityVulnerability.Package
 		pkgName := strings.ToLower(pkg.Name)
 		pkgEcosystem := strings.ToLower(pkg.Ecosystem)

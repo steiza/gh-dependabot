@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
@@ -37,6 +38,17 @@ func main() {
 		log.Fatal(err)
 	}
 
+	terminal := term.FromEnv()
+	if !terminal.IsTerminalOutput() {
+		nodes := da.GetNodes(repo.Owner(), repo.Name())
+		jsonBytes, err := json.Marshal(nodes)
+		if err != nil {
+			log.Fatal(err)
+		}
+		fmt.Print(string(jsonBytes))
+		return
+	}
+
 	findings := da.GetFindings(repo.Owner(), repo.Name())
 
 	if *interactive {
@@ -61,7 +73,7 @@ func main() {
 				details.SetText("")
 			} else {
 				item := findings[index]
-				details.SetText("\n  [green]Package:[white]  " + item.PackageString() + "\n\n  [green]Has PR:[white]   " + item.HasPR() + "\n\n  [green]Scope:[white]    " + strings.ToLower(item.DependencyScope) + "\n\n  [green]Severity:[white] " + da.SevIntToStr(item.TopSummarySeverity) + "\n\n  [green]Summary:[white]\n\n  " + item.SummaryString() + "\n\n  [green]Usage:[white]    " + item.VersionString() + "\n\n  [green]Upgrade:[white]  " + item.TopPatchedVersion)
+				details.SetText("\n  [green]Package:[white]  " + item.PackageString() + "\n\n  [green]Has PR:[white]   " + item.HasPR() + "\n\n  [green]Scope:[white]    " + strings.ToLower(item.DependencyScope) + "\n\n  [green]Severity:[white] " + da.SevIntToStr(item.TopSummarySeverity) + "\n\n  [green]Summary:[white]\n\n  " + item.SummaryString() + "\n\n  [green]Usage:[white]    " + item.VersionString())
 
 				frame.Clear()
 				frame.AddText("Dependabot Alerts for "+repo.Owner()+"/"+repo.Name(), true, tview.AlignCenter, tcell.ColorWhite)
@@ -119,7 +131,6 @@ func main() {
 
 	} else {
 		// Print out findings
-		terminal := term.FromEnv()
 		termWidth, _, _ := terminal.Size()
 		t := tableprinter.New(terminal.Out(), terminal.IsTerminalOutput(), termWidth)
 

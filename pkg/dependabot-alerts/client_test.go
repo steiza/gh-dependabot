@@ -68,17 +68,9 @@ func TestProcessFindings(t *testing.T) {
 		VulnerableManifestPath: "a/s/d/f",
 	})
 
-	query := Query{
-		Repository{
-			VulnerabilityAlerts{
-				Nodes: nodes,
-			},
-		},
-	}
-
 	findings := make(map[string]Finding)
 
-	processFindings(&query, findings)
+	processFindings(nodes, findings)
 
 	finding, ok := findings["testpkg (pip)"]
 
