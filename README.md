@@ -4,10 +4,10 @@ This [gh CLI extension](https://docs.github.com/en/github-cli/github-cli/using-g
 
 ```
 $ gh dependabot --repo steiza/dependabot-example
-Dependency     Summary                                Sev   Usage                            Upgrade
-----           ----                                   ----  ----                             ----
-pillow (pip)   (+ 23) Arbitrary expression inject...  crit  8.1.0 (requirements.txt)         9.2.0
-urllib3 (pip)  Catastrophic backtracking in URL a...  high  1.25.10 (test-requirements.txt)  1.26.5
+Dependency     Has PR  Scope  Sev   Version            Summary
+----           ----    ----   ----  ----               ----
+urllib3 (pip)  N       dev    high  1.25.10 -> 1.26.5  Catastrophic backtracking in URL authority parser when passed ...
+pillow (pip)   Y       run    crit  8.1.0 -> 9.2.0     (+ 23) Out-of-bounds Read
 ```
 
 It aggregates Dependabot alerts for the same dependency and ecosystem, and attempts to determine what version of the dependency you're currently using.
@@ -15,26 +15,37 @@ It aggregates Dependabot alerts for the same dependency and ecosystem, and attem
 There's also an interactive interface (`$ gh dependabot --repo steiza/dependabot-example --interactive`):
 
 ```
-                          Dependabot Alerts for steiza/dependabot-example
 
-urllib3 (pip)                                     ┌────────────────────────────────────────────────┐┐
-  = 1.25.10 (test-requirements.txt) -> 1.26.5     │                                                ││
-pillow (pip)                                      │  Package:  urllib3 (pip)                       ││
-  = 8.1.0 (requirements.txt) -> 9.2.0             │                                                ││
-                                                  │  Severity: high                                ││
-                                                  │                                                ││
-                                                  │  Summary:                                      ││
-                                                  │                                                ││
-                                                  │  Catastrophic backtracking in URL authority    ││
-                                                  │parser when passed URL containing many @        ││
-                                                  │characters                                      ││
-                                                  │                                                ││
-                                                  │  Usage:    = 1.25.10 (test-requirements.txt)   ││
-                                                  │                                                ││
-                                                  │  Upgrade:  1.26.5                              ││
-                                                  │                                                ││
-                                                  │                                                ││
-                                                  └────────────────────────────────────────────────┘┘
+                           Dependabot Alerts for steiza/dependabot-example
 
-                                q: quit   a: open alerts in browser
+  pillow (pip)                                    ┌───────────────────────────────────────────────┐
+  8.1.0 -> 9.2.0                                  │                                               │
+  urllib3 (pip)                                   │  Package:  pillow (pip)                       │
+  1.25.10 -> 1.26.5                               │                                               │
+                                                  │  Has PR:   Y                                  │
+                                                  │                                               │
+                                                  │  Scope:    runtime                            │
+                                                  │                                               │
+                                                  │  Severity: crit                               │
+                                                  │                                               │
+                                                  │  Summary:                                     │
+                                                  │                                               │
+                                                  │  (+ 23) Out-of-bounds Read                    │
+                                                  │                                               │
+                                                  │  Usage:    8.1.0 -> 9.2.0                     │
+                                                  │                                               │
+                                                  └───────────────────────────────────────────────┘
+
+                q: quit   a: view alerts in browser   p: view pull request in browser
+```
+
+If output is redirected, it will use the JSON it got back from the GitHub API, which could be useful for debugging:
+
+```
+$ gh dependabot --repo steiza/dependabot-example | jq
+[
+  {
+    "DependabotUpdate": {
+      "PullRequest": {
+...
 ```
