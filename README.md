@@ -1,5 +1,7 @@
 # gh-dependabot
 
+You can install this extension with `$ gh ext install steiza/gh-dependabot`.
+
 This [gh CLI extension](https://docs.github.com/en/github-cli/github-cli/using-github-cli-extensions) is for interacting with your [Dependabot alerts](https://docs.github.com/en/code-security/dependabot/dependabot-alerts) from the command line:
 
 ```
