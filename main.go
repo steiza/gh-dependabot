@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"flag"
 	"fmt"
 	"log"
 	"net/url"
@@ -16,14 +15,15 @@ import (
 	"github.com/cli/go-gh/pkg/term"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
+	"github.com/spf13/pflag"
 
 	da "github.com/steiza/gh-dependabot/pkg/dependabot-alerts"
 )
 
 func main() {
-	repoOverride := flag.String("repo", "r", "Repository to query. Current directory used by default.")
-	interactive := flag.Bool("interactive", false, "Interact with results in the terminal.")
-	flag.Parse()
+	repoOverride := pflag.StringP("repository", "r", "", "Repository to query. Current directory used by default.")
+	interactive := pflag.BoolP("interactive", "i", false, "Interact with results in the terminal.")
+	pflag.Parse()
 
 	var repo repository.Repository
 	var err error
@@ -50,6 +50,11 @@ func main() {
 	}
 
 	findings := da.GetFindings(repo.Owner(), repo.Name())
+
+	if len(findings) == 0 {
+		fmt.Println("No Dependabot Alerts found")
+		return
+	}
 
 	if *interactive {
 		app := tview.NewApplication()

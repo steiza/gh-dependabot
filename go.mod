@@ -7,6 +7,7 @@ require (
 	github.com/cli/shurcooL-graphql v0.0.2
 	github.com/gdamore/tcell/v2 v2.5.4
 	github.com/rivo/tview v0.0.0-20230203122838-f0550c7918da
+	github.com/spf13/pflag v1.0.5
 )
 
 require (
