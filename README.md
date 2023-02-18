@@ -2,17 +2,19 @@
 
 You can install this extension with `$ gh ext install steiza/gh-dependabot`.
 
-This [gh CLI extension](https://docs.github.com/en/github-cli/github-cli/using-github-cli-extensions) is for interacting with your [Dependabot alerts](https://docs.github.com/en/code-security/dependabot/dependabot-alerts) from the command line:
+A [gh CLI extension](https://docs.github.com/en/github-cli/github-cli/using-github-cli-extensions) for interacting with your [Dependabot alerts](https://docs.github.com/en/code-security/dependabot/dependabot-alerts) and [Dependabot security updates](https://docs.github.com/en/code-security/dependabot/dependabot-security-updates/about-dependabot-security-updates) from the command line.
+
+## Dependabot alerts
+
+First up, Dependabot alerts:
 
 ```
-$ gh dependabot -r steiza/dependabot-example
-Dependency     Has PR  Scope  Sev   Version            Summary
-----           ----    ----   ----  ----               ----
-urllib3 (pip)  N       dev    high  1.25.10 -> 1.26.5  Catastrophic backtracking in URL authority parser when passed ...
-pillow (pip)   Y       run    crit  8.1.0 -> 9.2.0     (+ 23) Out-of-bounds Read
+$ gh dependabot alerts -r steiza/dependabot-example
+pillow (pip)   /steiza/dependabot-example/pull/2  run  crit  8.1.0 -> 9.2.0     (+ 23) Out-of-bounds Read
+urllib3 (pip)  /steiza/dependabot-example/pull/1  dev  high  1.25.10 -> 1.26.5  Catastrophic backtracking in URL auth...
 ```
 
-It aggregates Dependabot alerts for the same dependency and ecosystem, and attempts to determine what version of the dependency you're currently using.
+Alerts are aggregated by dependency and ecosystem, with information about runtime or development dependendies, as well as what version you're currently using.
 
 There's also an interactive interface:
 
@@ -52,3 +54,22 @@ $ gh dependabot -r steiza/dependabot-example | jq
       "PullRequest": {
 ...
 ```
+
+## Dependabot security updates
+
+You can also land pending Dependabot security updates:
+
+```
+$ gh dependabot updates -r steiza/dependabot-example -m
+https://github.com/steiza/dependabot-example/pull/2
+https://github.com/steiza/dependabot-example/pull/1
+? Merge 2 pull requests? Yes
+Merging 2 pull requests
+Working on https://github.com/steiza/dependabot-example/pull/2
+        Pull Request successfully merged
+Working on https://github.com/steiza/dependabot-example/pull/1
+        Waiting for pull request to be mergable
+        Pull Request successfully merged
+```
+
+This could be useful if you lots of pending pull requests, or if you want to automate landing these pull requests (see `--yes`).

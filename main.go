@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/AlecAivazis/survey/v2"
 	gh "github.com/cli/go-gh"
 	"github.com/cli/go-gh/pkg/browser"
 	"github.com/cli/go-gh/pkg/repository"
@@ -15,27 +16,27 @@ import (
 	"github.com/cli/go-gh/pkg/term"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
-	"github.com/spf13/pflag"
+	"github.com/spf13/cobra"
 
 	da "github.com/steiza/gh-dependabot/pkg/dependabot-alerts"
+	"github.com/steiza/gh-dependabot/pkg/pulls"
 )
 
-func main() {
-	repoOverride := pflag.StringP("repository", "r", "", "Repository to query. Current directory used by default.")
-	interactive := pflag.BoolP("interactive", "i", false, "Interact with results in the terminal.")
-	pflag.Parse()
+var repoOverride string
+var interactive, merge, yes bool
 
+func runAlertsCmd(cmd *cobra.Command, args []string) error {
 	var repo repository.Repository
 	var err error
 
-	if *repoOverride == "" {
+	if repoOverride == "" {
 		repo, err = gh.CurrentRepository()
 	} else {
-		repo, err = repository.Parse(*repoOverride)
+		repo, err = repository.Parse(repoOverride)
 	}
 
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 
 	terminal := term.FromEnv()
@@ -43,20 +44,20 @@ func main() {
 		nodes := da.GetNodes(repo.Owner(), repo.Name())
 		jsonBytes, err := json.Marshal(nodes)
 		if err != nil {
-			log.Fatal(err)
+			return err
 		}
 		fmt.Print(string(jsonBytes))
-		return
+		return nil
 	}
 
 	findings := da.GetFindings(repo.Owner(), repo.Name())
 
 	if len(findings) == 0 {
 		fmt.Println("No Dependabot Alerts found")
-		return
+		return nil
 	}
 
-	if *interactive {
+	if interactive {
 		app := tview.NewApplication()
 
 		details := tview.NewTextView().SetDynamicColors(true).SetWordWrap(true)
@@ -131,7 +132,7 @@ func main() {
 
 		err := app.SetRoot(frame, true).Run()
 		if err != nil {
-			log.Fatal(err)
+			return err
 		}
 
 	} else {
@@ -139,28 +140,9 @@ func main() {
 		termWidth, _, _ := terminal.Size()
 		t := tableprinter.New(terminal.Out(), terminal.IsTerminalOutput(), termWidth)
 
-		t.AddField("Dependency")
-		t.AddField("Has PR")
-		t.AddField("Scope")
-		t.AddField("Sev")
-		t.AddField("Version")
-		t.AddField("Summary")
-		t.EndRow()
-		t.AddField("----")
-		t.AddField("----")
-		t.AddField("----")
-		t.AddField("----")
-		t.AddField("----")
-		t.AddField("----")
-		t.EndRow()
-
 		for _, value := range findings {
 			t.AddField(value.PackageString())
-			if value.PullRequestURL != "" {
-				t.AddField("Y")
-			} else {
-				t.AddField("N")
-			}
+			t.AddField(value.PullRequestURL)
 			t.AddField(strings.ToLower(value.DependencyScope[:3]))
 			t.AddField(da.SevIntToStr(value.TopSummarySeverity))
 			t.AddField(value.VersionString())
@@ -169,7 +151,146 @@ func main() {
 		}
 
 		if err = t.Render(); err != nil {
-			log.Fatal(err)
+			return err
 		}
 	}
+
+	return nil
+}
+
+func runUpdatesCmd(cmd *cobra.Command, args []string) error {
+	var repo repository.Repository
+	var err error
+
+	if repoOverride == "" {
+		repo, err = gh.CurrentRepository()
+	} else {
+		repo, err = repository.Parse(repoOverride)
+	}
+
+	if err != nil {
+		return err
+	}
+
+	findings := da.GetFindings(repo.Owner(), repo.Name())
+
+	if !merge {
+		// Just print out information about updates and return
+		terminal := term.FromEnv()
+		termWidth, _, _ := terminal.Size()
+		t := tableprinter.New(terminal.Out(), terminal.IsTerminalOutput(), termWidth)
+
+		for _, value := range findings {
+			if value.PullRequestURL == "" {
+				continue
+			}
+
+			t.AddField("https://" + repo.Host() + value.PullRequestURL)
+			t.AddField(value.PackageString())
+			t.AddField(value.VersionString())
+			t.EndRow()
+		}
+
+		if err = t.Render(); err != nil {
+			return err
+		}
+
+		return nil
+	}
+
+	prUrls := []string{}
+	for _, value := range findings {
+		if value.PullRequestURL != "" {
+			prUrl := "https://" + repo.Host() + value.PullRequestURL
+			fmt.Println(prUrl)
+			prUrls = append(prUrls, prUrl)
+		}
+	}
+
+	if len(prUrls) == 0 {
+		fmt.Println("No pull requests found!")
+		return nil
+	}
+
+	if !yes {
+		// Confirm intent to merge pull requests
+		prompt := &survey.Confirm{
+			Message: fmt.Sprintf("Merge %d pull requests?", len(prUrls)),
+		}
+
+		confirm := false
+		survey.AskOne(prompt, &confirm)
+
+		if !confirm {
+			return nil
+		}
+	}
+
+	fmt.Printf("Merging %d pull requests\n", len(prUrls))
+
+	client, err := gh.RESTClient(nil)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	for _, prUrl := range prUrls {
+		fmt.Printf("Working on %s\n", prUrl)
+
+		pull := pulls.Pull{}
+		prUrlParts := strings.Split(prUrl, "/")
+		prNumber := prUrlParts[len(prUrlParts)-1]
+		pulls.GetPullRequest(client, repo.Owner(), repo.Name(), prNumber, &pull)
+
+		if pull.State != "open" {
+			fmt.Printf("\tPull request state is %s; skipping\n", pull.State)
+			continue
+		}
+
+		if !pull.Mergeable {
+			fmt.Println("\tWaiting for pull request to be mergable")
+			mergable := pulls.WaitForMergable(client, repo.Owner(), repo.Name(), prNumber)
+			if !mergable {
+				fmt.Println("\tPull request not mergable; skipping")
+			}
+		}
+
+		merge := pulls.Merge{}
+		pulls.MergePullRequest(client, repo.Owner(), repo.Name(), prNumber, &merge)
+		fmt.Printf("\t%s\n", merge.Message)
+	}
+
+	return nil
+}
+
+func main() {
+	depCmd := cobra.Command{
+		Use:     "dependabot",
+		Short:   "Manage Dependabot alerts and updates",
+		Aliases: []string{"dep", "depbot"},
+	}
+
+	depAlertsCmd := cobra.Command{
+		Use:     "alerts",
+		Short:   "Summarize Dependabot alerts by dependency",
+		Aliases: []string{"alert", "a"},
+		RunE:    runAlertsCmd,
+	}
+
+	depAlertsCmd.Flags().StringVarP(&repoOverride, "repository", "r", "", "Repository to query. Current directory is used by default.")
+	depAlertsCmd.Flags().BoolVarP(&interactive, "interactive", "i", false, "Interact with results in the terminal.")
+	depCmd.AddCommand(&depAlertsCmd)
+
+	depUpdatesCmd := cobra.Command{
+		Use:     "updates",
+		Short:   "View and merge Dependabot updates pull requests",
+		Aliases: []string{"update", "u"},
+		RunE:    runUpdatesCmd,
+	}
+
+	depUpdatesCmd.Flags().StringVarP(&repoOverride, "repository", "r", "", "Repository to query. Current directory is used by default.")
+	depUpdatesCmd.Flags().BoolVarP(&merge, "merge", "m", false, "Select Dependabot updates to merge.")
+	depUpdatesCmd.Flags().BoolVarP(&yes, "yes", "y", false, "Merge Dependabot updates without prompting for confirmation.")
+	depCmd.AddCommand(&depUpdatesCmd)
+
+	depCmd.Execute()
 }
