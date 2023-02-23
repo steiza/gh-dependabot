@@ -174,41 +174,35 @@ func runUpdatesCmd(cmd *cobra.Command, args []string) error {
 
 	findings := da.GetFindings(repo.Owner(), repo.Name())
 
-	if !merge {
-		// Just print out information about updates and return
-		terminal := term.FromEnv()
-		termWidth, _, _ := terminal.Size()
-		t := tableprinter.New(terminal.Out(), terminal.IsTerminalOutput(), termWidth)
-
-		for _, value := range findings {
-			if value.PullRequestURL == "" {
-				continue
-			}
-
-			t.AddField("https://" + repo.Host() + value.PullRequestURL)
-			t.AddField(value.PackageString())
-			t.AddField(value.VersionString())
-			t.EndRow()
-		}
-
-		if err = t.Render(); err != nil {
-			return err
-		}
-
-		return nil
-	}
+	terminal := term.FromEnv()
+	termWidth, _, _ := terminal.Size()
+	t := tableprinter.New(terminal.Out(), terminal.IsTerminalOutput(), termWidth)
 
 	prUrls := []string{}
 	for _, value := range findings {
-		if value.PullRequestURL != "" {
-			prUrl := "https://" + repo.Host() + value.PullRequestURL
-			fmt.Println(prUrl)
-			prUrls = append(prUrls, prUrl)
+		if value.PullRequestURL == "" {
+			continue
 		}
+
+		prUrl := "https://" + repo.Host() + value.PullRequestURL
+		prUrls = append(prUrls, prUrl)
+
+		t.AddField(prUrl)
+		t.AddField(value.PackageString())
+		t.AddField(value.VersionString())
+		t.EndRow()
+	}
+
+	if err = t.Render(); err != nil {
+		return err
 	}
 
 	if len(prUrls) == 0 {
-		fmt.Println("No pull requests found!")
+		fmt.Println("No pull requests found")
+	}
+
+	if !merge || len(prUrls) == 0 {
+		// If we aren't merging, or if there aren't any PRs to merge, we're done!
 		return nil
 	}
 
