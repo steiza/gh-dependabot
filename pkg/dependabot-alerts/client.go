@@ -1,8 +1,12 @@
 package da
 
 import (
+	"encoding/json"
 	"fmt"
+	"io"
 	"log"
+	"net/http"
+	"net/url"
 	"regexp"
 	"sort"
 	"strconv"
@@ -65,6 +69,14 @@ type Query struct {
 	Repository Repository `graphql:"repository(name: $name, owner: $owner)"`
 }
 
+type CompatabilityResponse struct {
+	Data struct {
+		Attributes struct {
+			Status string
+		}
+	}
+}
+
 type Finding struct {
 	Name               string
 	Ecosystem          string
@@ -122,6 +134,52 @@ func (f Finding) HasPR() string {
 	} else {
 		return "N"
 	}
+}
+
+func (f Finding) GetCompatability() string {
+	client := &http.Client{}
+
+	packageManager := f.Ecosystem
+	if packageManager == "go" {
+		packageManager = "go_modules"
+	}
+
+	values := url.Values{
+		"dependency-name":  {f.Name},
+		"package-manager":  {packageManager},
+		"previous-version": {f.ManifestVersion},
+		"new-version":      {f.TopPatchedVersion},
+	}
+
+	req, err := http.NewRequest("GET", "https://dependabot-badges.githubapp.com/badges/compatibility_score?"+values.Encode(), nil)
+	if err != nil {
+		log.Print("Unable to create compatability request")
+		return "unknown"
+	}
+
+	req.Header.Add("Accept", "application/json")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Print("Unable to reach compatability endpoint")
+		return "unknown"
+	}
+
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		log.Print("Unable to read compatability response")
+		return "unknown"
+	}
+
+	compatability := CompatabilityResponse{}
+	err = json.Unmarshal(body, &compatability)
+	if err != nil {
+		log.Print("Unable to parse compatability response")
+		return "unknown"
+	}
+
+	return compatability.Data.Attributes.Status
 }
 
 func semverLess(i, j string) bool {

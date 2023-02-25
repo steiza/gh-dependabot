@@ -61,8 +61,8 @@ You can also land pending Dependabot security updates:
 
 ```
 $ gh dependabot updates -r steiza/dependabot-example -m
-https://github.com/steiza/dependabot-example/pull/2
-https://github.com/steiza/dependabot-example/pull/1
+https://github.com/steiza/dependabot-example/pull/2  75%  pillow (pip)   8.1.0 -> 9.2.0
+https://github.com/steiza/dependabot-example/pull/1  66%  urllib3 (pip)  1.25.10 -> 1.26.5
 ? Merge 2 pull requests? Yes
 Merging 2 pull requests
 Working on https://github.com/steiza/dependabot-example/pull/2

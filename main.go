@@ -188,6 +188,7 @@ func runUpdatesCmd(cmd *cobra.Command, args []string) error {
 		prUrls = append(prUrls, prUrl)
 
 		t.AddField(prUrl)
+		t.AddField(value.GetCompatability())
 		t.AddField(value.PackageString())
 		t.AddField(value.VersionString())
 		t.EndRow()
