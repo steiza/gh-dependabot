@@ -9,11 +9,11 @@ import (
 	"strings"
 
 	"github.com/AlecAivazis/survey/v2"
-	gh "github.com/cli/go-gh"
-	"github.com/cli/go-gh/pkg/browser"
-	"github.com/cli/go-gh/pkg/repository"
-	"github.com/cli/go-gh/pkg/tableprinter"
-	"github.com/cli/go-gh/pkg/term"
+	"github.com/cli/go-gh/v2/pkg/api"
+	"github.com/cli/go-gh/v2/pkg/browser"
+	"github.com/cli/go-gh/v2/pkg/repository"
+	"github.com/cli/go-gh/v2/pkg/tableprinter"
+	"github.com/cli/go-gh/v2/pkg/term"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 	"github.com/spf13/cobra"
@@ -30,7 +30,7 @@ func runAlertsCmd(cmd *cobra.Command, args []string) error {
 	var err error
 
 	if repoOverride == "" {
-		repo, err = gh.CurrentRepository()
+		repo, err = repository.Current()
 	} else {
 		repo, err = repository.Parse(repoOverride)
 	}
@@ -41,7 +41,7 @@ func runAlertsCmd(cmd *cobra.Command, args []string) error {
 
 	terminal := term.FromEnv()
 	if !terminal.IsTerminalOutput() {
-		nodes := da.GetNodes(repo.Owner(), repo.Name())
+		nodes := da.GetNodes(repo.Owner, repo.Name)
 		jsonBytes, err := json.Marshal(nodes)
 		if err != nil {
 			return err
@@ -50,7 +50,7 @@ func runAlertsCmd(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	findings := da.GetFindings(repo.Owner(), repo.Name())
+	findings := da.GetFindings(repo.Owner, repo.Name)
 
 	if len(findings) == 0 {
 		fmt.Println("No Dependabot Alerts found")
@@ -71,7 +71,7 @@ func runAlertsCmd(cmd *cobra.Command, args []string) error {
 		flex := tview.NewFlex().AddItem(depList, 0, 1, true).AddItem(details, 0, 1, false)
 
 		frame := tview.NewFrame(flex).SetBorders(1, 1, 1, 1, 0, 0)
-		frame.AddText("Dependabot Alerts for "+repo.Owner()+"/"+repo.Name(), true, tview.AlignCenter, tcell.ColorWhite)
+		frame.AddText("Dependabot Alerts for "+repo.Owner+"/"+repo.Name, true, tview.AlignCenter, tcell.ColorWhite)
 		frame.AddText("q: quit   a: view alerts in browser   p: view pull request in browser", false, tview.AlignCenter, tcell.ColorWhite)
 
 		depListChangedFunc := func(index int, mainText, secondaryText string, shortcut rune) {
@@ -82,7 +82,7 @@ func runAlertsCmd(cmd *cobra.Command, args []string) error {
 				details.SetText("\n  [green]Package:[white]  " + item.PackageString() + "\n\n  [green]Has PR:[white]   " + item.HasPR() + "\n\n  [green]Scope:[white]    " + strings.ToLower(item.DependencyScope) + "\n\n  [green]Severity:[white] " + da.SevIntToStr(item.TopSummarySeverity) + "\n\n  [green]Summary:[white]\n\n  " + item.SummaryString() + "\n\n  [green]Usage:[white]    " + item.VersionString())
 
 				frame.Clear()
-				frame.AddText("Dependabot Alerts for "+repo.Owner()+"/"+repo.Name(), true, tview.AlignCenter, tcell.ColorWhite)
+				frame.AddText("Dependabot Alerts for "+repo.Owner+"/"+repo.Name, true, tview.AlignCenter, tcell.ColorWhite)
 				if item.PullRequestURL != "" {
 					frame.AddText("q: quit   a: view alerts in browser   p: view pull request in browser", false, tview.AlignCenter, tcell.ColorWhite)
 				} else {
@@ -106,7 +106,7 @@ func runAlertsCmd(cmd *cobra.Command, args []string) error {
 
 				params := url.Values{}
 				params.Add("q", fmt.Sprintf("is:open package:%s ecosystem:%s", item.Name, item.Ecosystem))
-				url := "https://" + repo.Host() + "/" + repo.Owner() + "/" + repo.Name() + "/security/dependabot?" + params.Encode()
+				url := "https://" + repo.Host + "/" + repo.Owner + "/" + repo.Name + "/security/dependabot?" + params.Encode()
 				b := browser.New("", os.Stdout, os.Stderr)
 				err = b.Browse(url)
 				if err != nil {
@@ -118,7 +118,7 @@ func runAlertsCmd(cmd *cobra.Command, args []string) error {
 				item := findings[index]
 
 				if item.PullRequestURL != "" {
-					url := "https://" + repo.Host() + item.PullRequestURL
+					url := "https://" + repo.Host + item.PullRequestURL
 					b := browser.New("", os.Stdout, os.Stderr)
 					err = b.Browse(url)
 					if err != nil {
@@ -163,7 +163,7 @@ func runUpdatesCmd(cmd *cobra.Command, args []string) error {
 	var err error
 
 	if repoOverride == "" {
-		repo, err = gh.CurrentRepository()
+		repo, err = repository.Current()
 	} else {
 		repo, err = repository.Parse(repoOverride)
 	}
@@ -172,7 +172,7 @@ func runUpdatesCmd(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	findings := da.GetFindings(repo.Owner(), repo.Name())
+	findings := da.GetFindings(repo.Owner, repo.Name)
 
 	terminal := term.FromEnv()
 	termWidth, _, _ := terminal.Size()
@@ -184,7 +184,7 @@ func runUpdatesCmd(cmd *cobra.Command, args []string) error {
 			continue
 		}
 
-		prUrl := "https://" + repo.Host() + value.PullRequestURL
+		prUrl := "https://" + repo.Host + value.PullRequestURL
 		prUrls = append(prUrls, prUrl)
 
 		t.AddField(prUrl)
@@ -223,7 +223,7 @@ func runUpdatesCmd(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("Merging %d pull requests\n", len(prUrls))
 
-	client, err := gh.RESTClient(nil)
+	client, err := api.DefaultRESTClient()
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -234,7 +234,7 @@ func runUpdatesCmd(cmd *cobra.Command, args []string) error {
 		pull := pulls.Pull{}
 		prUrlParts := strings.Split(prUrl, "/")
 		prNumber := prUrlParts[len(prUrlParts)-1]
-		pulls.GetPullRequest(client, repo.Owner(), repo.Name(), prNumber, &pull)
+		pulls.GetPullRequest(client, repo.Owner, repo.Name, prNumber, &pull)
 
 		if pull.State != "open" {
 			fmt.Printf("\tPull request state is %s; skipping\n", pull.State)
@@ -243,14 +243,14 @@ func runUpdatesCmd(cmd *cobra.Command, args []string) error {
 
 		if !pull.Mergeable {
 			fmt.Println("\tWaiting for pull request to be mergable")
-			mergable := pulls.WaitForMergable(client, repo.Owner(), repo.Name(), prNumber)
+			mergable := pulls.WaitForMergable(client, repo.Owner, repo.Name, prNumber)
 			if !mergable {
 				fmt.Println("\tPull request not mergable; skipping")
 			}
 		}
 
 		merge := pulls.Merge{}
-		pulls.MergePullRequest(client, repo.Owner(), repo.Name(), prNumber, &merge)
+		pulls.MergePullRequest(client, repo.Owner, repo.Name, prNumber, &merge)
 		fmt.Printf("\t%s\n", merge.Message)
 	}
 
