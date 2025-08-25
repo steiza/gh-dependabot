@@ -12,7 +12,7 @@ import (
 	"strconv"
 	"strings"
 
-	gh "github.com/cli/go-gh"
+	"github.com/cli/go-gh/v2/pkg/api"
 	graphql "github.com/cli/shurcooL-graphql"
 )
 
@@ -242,7 +242,7 @@ var urlPath *string
 func GetNodes(repoOwner, repoName string) []Node {
 	var nodes []Node
 
-	client, err := gh.GQLClient(nil)
+	client, err := api.DefaultGraphQLClient()
 	if err != nil {
 		log.Fatal(err)
 	}

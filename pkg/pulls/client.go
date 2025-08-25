@@ -7,7 +7,7 @@ import (
 	"math"
 	"time"
 
-	"github.com/cli/go-gh/pkg/api"
+	"github.com/cli/go-gh/v2/pkg/api"
 )
 
 type Pull struct {
@@ -20,14 +20,14 @@ type Merge struct {
 	Message string
 }
 
-func GetPullRequest(client api.RESTClient, owner, name, prNumber string, pull *Pull) {
+func GetPullRequest(client *api.RESTClient, owner, name, prNumber string, pull *Pull) {
 	err := client.Get("repos/"+owner+"/"+name+"/pulls/"+prNumber, pull)
 	if err != nil {
 		log.Fatal(err)
 	}
 }
 
-func WaitForMergable(client api.RESTClient, owner, name, prNumber string) bool {
+func WaitForMergable(client *api.RESTClient, owner, name, prNumber string) bool {
 	pull := Pull{}
 
 	for i := 0; i < 4; i++ {
@@ -41,7 +41,7 @@ func WaitForMergable(client api.RESTClient, owner, name, prNumber string) bool {
 	return false
 }
 
-func MergePullRequest(client api.RESTClient, owner, name, prNumber string, merge *Merge) {
+func MergePullRequest(client *api.RESTClient, owner, name, prNumber string, merge *Merge) {
 	urlPathStr := "repos/" + owner + "/" + name + "/pulls/" + prNumber + "/merge"
 	urlPath := &urlPathStr
 
