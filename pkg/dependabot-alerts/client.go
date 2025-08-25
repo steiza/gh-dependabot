@@ -125,7 +125,12 @@ func (f Finding) SummaryString() string {
 }
 
 func (f Finding) VersionString() string {
-	return fmt.Sprintf("%s -> %s", strings.SplitAfter(f.ManifestVersion, " ")[1], f.TopPatchedVersion)
+	before := f.ManifestVersion
+	parts := strings.SplitAfter(f.ManifestVersion, " ")
+	if len(parts) > 1 {
+		before = parts[1]
+	}
+	return fmt.Sprintf("%s -> %s", before, f.TopPatchedVersion)
 }
 
 func (f Finding) HasPR() string {
